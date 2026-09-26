@@ -1,0 +1,1 @@
+# musicbee-halfstar-plugin
