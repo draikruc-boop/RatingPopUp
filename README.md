@@ -6,3 +6,4 @@ Resizable window that opens at the last 30sec of the track if it has no ratings.
 
 <img width="1247" height="320" alt="Screenshot 2026-10-03 101020" src="https://github.com/user-attachments/assets/8a96b5b4-b8b2-4133-a6eb-7086aacd3865" />
 
+To install just copy dll into your plugin folder
