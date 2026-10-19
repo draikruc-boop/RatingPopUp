@@ -342,7 +342,8 @@ namespace MusicBeePlugin
             cornerRadius, topContentPadding, starVerticalNudge, shadowExpand, shadowOffsetX, shadowOffsetY,
             artGap, buttonRowGap, buttonRowHeight, buttonSize, buttonSpacing, artLeftInset, titleLineGap, visualizerHeight, visualizerGap, closeSize, starRowHeight, columnRightInset, titleGap;
         private float borderWidth;
-        private Font titleFont;
+        private Font titleFont;         // full-size font, used for the capital letters of the title
+        private Font titleFontSmallCaps; // smaller size, used for the title's lowercase letters (the "small caps" look)
 
         // Soft top-to-bottom shading for the card background.
         private static readonly Color GradientTop = Color.FromArgb(240, 240, 244);
@@ -434,13 +435,14 @@ namespace MusicBeePlugin
                 // instead of centering the text across the whole panel height (which
                 // left the line sitting almost directly under the text).
                 var textRect = new Rectangle(0, 0, infoPanel.Width, Math.Max(1, infoPanel.Height - titleLineGap));
-                TextRenderer.DrawText(
+                e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                DrawSmallCapsCentered(
                     e.Graphics,
                     titleText,
-                    titleFont ?? SystemFonts.DefaultFont,
                     textRect,
-                    Color.FromArgb(28, 28, 30),
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                    titleFont ?? SystemFonts.DefaultFont,
+                    titleFontSmallCaps ?? SystemFonts.DefaultFont,
+                    Color.FromArgb(28, 28, 30));
 
                 // A short, centered divider under the title (about half the panel width).
                 using (var dividerPen = new Pen(Color.FromArgb(70, 0, 0, 0), 1f))
@@ -461,6 +463,12 @@ namespace MusicBeePlugin
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 e.Graphics.CompositingQuality = CompositingQuality.HighQuality;
+
+                // Paint the card's own background first, so the four corners outside the
+                // rounded clip (which DrawImage never touches) show the matching gradient
+                // instead of the panel's default grey - that grey showing through was the
+                // "dark triangles" at the art's corners.
+                PaintGradientSlice(e.Graphics, artPanel);
 
                 var rect = artPanel.ClientRectangle;
                 int radius = Math.Max(2, cornerRadius / 2);
@@ -588,6 +596,7 @@ namespace MusicBeePlugin
                 shadowForm?.Dispose();
                 this.albumArt?.Dispose();
                 titleFont?.Dispose();
+                titleFontSmallCaps?.Dispose();
             };
 
             // Dragging an edge/corner is handled via WM_NCHITTEST (see WndProc below), which
@@ -696,6 +705,13 @@ namespace MusicBeePlugin
                 var old = titleFont;
                 titleFont = new Font("Segoe UI", newFontSize);
                 old?.Dispose();
+
+                // "Small caps" look: capitals drawn with titleFont, lowercase letters
+                // drawn with this smaller font (about 72% of cap height, the usual
+                // small-caps ratio), both in the same family/weight.
+                var oldSmall = titleFontSmallCaps;
+                titleFontSmallCaps = new Font("Segoe UI", Math.Max(6f, newFontSize * 0.72f));
+                oldSmall?.Dispose();
             }
 
             // Album art is a square, sized relative to the full content height, and
@@ -906,6 +922,71 @@ namespace MusicBeePlugin
             using (var brush = new LinearGradientBrush(rect, GradientTop, GradientBottom, LinearGradientMode.Vertical))
             {
                 g.FillRectangle(brush, control.ClientRectangle);
+            }
+        }
+
+        // Draws text in a manual "small caps" style: every letter is rendered as a
+        // capital, but letters that were originally lowercase use the smaller of the
+        // two fonts, so the original capitalization pattern still reads through (e.g.
+        // "Arnold Schönberg" becomes a Mix of big and small capitals, not all one size).
+        // GDI+ has no built-in small-caps feature, so this measures and places each
+        // character by hand, horizontally centered in rect and trimmed with an
+        // ellipsis if it doesn't fit.
+        private void DrawSmallCapsCentered(Graphics g, string text, Rectangle rect, Font fullCapFont, Font smallCapFont, Color color)
+        {
+            if (string.IsNullOrEmpty(text) || rect.Width <= 0 || rect.Height <= 0)
+                return;
+
+            using (var sf = StringFormat.GenericTypographic)
+            {
+                sf.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+
+                float[] MeasureAll(string s, out float totalWidth)
+                {
+                    var w = new float[s.Length];
+                    float sum = 0;
+                    for (int i = 0; i < s.Length; i++)
+                    {
+                        char c = s[i];
+                        Font f = char.IsLower(c) ? smallCapFont : fullCapFont;
+                        w[i] = g.MeasureString(char.ToUpperInvariant(c).ToString(), f, int.MaxValue, sf).Width;
+                        sum += w[i];
+                    }
+                    totalWidth = sum;
+                    return w;
+                }
+
+                float total;
+                float[] widths = MeasureAll(text, out total);
+                string display = text;
+
+                if (total > rect.Width && text.Length > 1)
+                {
+                    float ellipsisWidth = g.MeasureString("…", fullCapFont, int.MaxValue, sf).Width;
+                    float running = 0;
+                    int cut = 1;
+                    for (int i = 0; i < text.Length; i++)
+                    {
+                        running += widths[i];
+                        if (running + ellipsisWidth > rect.Width) break;
+                        cut = i + 1;
+                    }
+                    display = text.Substring(0, cut) + "…";
+                    widths = MeasureAll(display, out total);
+                }
+
+                float x = rect.X + Math.Max(0, (rect.Width - total) / 2f);
+                using (var brush = new SolidBrush(color))
+                {
+                    for (int i = 0; i < display.Length; i++)
+                    {
+                        char c = display[i];
+                        Font f = char.IsLower(c) ? smallCapFont : fullCapFont;
+                        float y = rect.Y + (rect.Height - f.Height) / 2f;
+                        g.DrawString(char.ToUpperInvariant(c).ToString(), f, brush, x, y, sf);
+                        x += widths[i];
+                    }
+                }
             }
         }
 
